@@ -1,20 +1,25 @@
 from __future__ import annotations
 
 import os
+import shutil
 import logging
+import subprocess
 from argparse import ArgumentParser
 from configparser import ConfigParser
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
-from upload_mpy.config import DEFAULT_CONFIG, ProjectConfig
+from config import DEFAULT_CONFIG, ProjectConfig
 
 if TYPE_CHECKING:
-    from typing import Any
+    from typing import Any, Optional, Iterable
 
 
 DEFAULT_DEVICE = '/dev/ttyACM0'
-DEFAULT_CONFIG = 'deploy.cfg'
+DEFAULT_CFGFILE = 'deploy.cfg'
 DEFAULT_PKGCACHE = '.pkgcache'
+TMP_IMAGE = ':tmp:'
+DEFAULT_IMAGE = TMP_IMAGE
 
 
 _log = logging.getLogger()
@@ -27,16 +32,16 @@ def setup_cli() -> ArgumentParser:
     cli.add_argument(
         '-d', '--device',
         default = DEFAULT_DEVICE,
-        help = f"Serial device to communicate with RP2040 (default: {DEFAULT_DEVICE})",
+        help = f"Serial device to communicate with RP2040 (default={DEFAULT_DEVICE})",
         metavar = "DEVICE",
         dest = 'device',
     )
     cli.add_argument(
         '-c', '--config',
-        default = DEFAULT_CONFIG,
+        default = DEFAULT_CFGFILE,
         help = (
             "Path to the project config file. If the config file does not exist, "
-            f"a new default configuration will be created (default: {DEFAULT_CONFIG})"
+            f"a new default configuration will be created (default={DEFAULT_CFGFILE})"
         ),
         metavar = "FILE",
         dest = 'cfg_path',
@@ -60,7 +65,7 @@ def setup_cli() -> ArgumentParser:
         dest = 'force_fetch',
     )
     cli.add_argument(
-        '--root',
+        '--root-dir',
         default = None,
         help = (
             "Specify the root directory when searching for files. "
@@ -74,7 +79,7 @@ def setup_cli() -> ArgumentParser:
         default = DEFAULT_PKGCACHE,
         help = (
             "The folder where upip packages will be cached. "
-            f"This is ignored if --no-cache is set. (default: {DEFAULT_PKGCACHE})"
+            f"This is ignored if --no-cache is set. (default={DEFAULT_PKGCACHE})"
         ),
         metavar = "FOLDER",
         dest = 'work_dir',
@@ -90,24 +95,35 @@ def setup_cli() -> ArgumentParser:
     )
     cli.add_argument(
         '--image-dir',
-        default = ':temp:',
+        default = DEFAULT_IMAGE,
         help = (
-            ""
+            "The directory where the image will be built before uploading to the target device."
+            f"If set to '{TMP_IMAGE}' then a temporary directory will be used and removed after "
+            f"upload is complete. Otherwise the image directory will be left as-is. (default={DEFAULT_IMAGE})"
         ),
+        metavar = "FOLDER",
+        dest = 'image_dir',
+    )
+    cli.add_argument(
+        '--keep-src',
+        action = 'store_true',
+        help = (
+            "Script files compiled with mpy-cross will be kept in the image and uploaded along "
+            "with the compiled .mpy files."
+        ),
+        dest = 'keep_src',
     )
 
     return cli
 
-def main(args: Any) -> None:
+def load_config(cfg_path: str) -> ConfigParser:
     config = ConfigParser()
     config.read_dict(DEFAULT_CONFIG)
 
     # load config or create file if it does not exist
-    cfg_path = args.cfg_path
-    search_dir = args.search_dir
     if os.path.exists(cfg_path):
         if not os.path.isfile(cfg_path):
-            raise RuntimeError(f"Can't read config, '{cfg_path}' is not a normal file!")
+            raise RuntimeError(f"Can't read config, '{cfg_path}' is not a regular file!")
         _log.debug(f"Reading config from '{cfg_path}'")
         with open(cfg_path, 'rt') as f:
             config.read_file(f)
@@ -115,14 +131,73 @@ def main(args: Any) -> None:
         _log.warning(f"Config file not found. Writing default config to '{cfg_path}' and exiting.")
         with open(cfg_path, 'wt') as f:
             config.write(f)
-        return
+        raise SystemExit(1)
 
-    if search_dir is None:
-        search_dir = os.path.dirname(cfg_path)
+    return config
 
-    project = ProjectConfig.load(config)
-    for file_path in project.find_files(search_dir):
-        print(file_path)
+
+class UploadProject:
+    def __init__(self, config: ProjectConfig, image_dir: str):
+        self.config = config
+        self.image_dir = image_dir
+        self.src_files = []
+
+    def add_project_files(self, search_dir: str) -> None:
+        for file_path in self.config.find_files(search_dir):
+            if os.path.isfile(file_path):
+                self.src_files.append(file_path)
+            elif not os.path.isdir(file_path):
+                _log.warning(f"Ignoring non-regular project file '{file_path}'")
+
+_MPY_CROSS = 'mpy-cross'
+def cross_compile_script(script_path: str, *, compile_args: Iterable[str] = (), delete: bool = False) -> None:
+    cmd = [_MPY_CROSS, *compile_args, script_path]
+    result = subprocess.run(cmd, text=True)
+
+    if result.returncode == 0:
+        if delete:
+            os.remove(script_path)
+    else:
+        _log.warning(f"Failed to compile script '{script_path}' (code {result.returncode})")
+        _log.debug(result.stderr.encode(errors='replace'))
+
+
+def main(args: Any) -> None:
+    cfg_path = args.cfg_path
+    root_dir = args.search_dir or os.path.dirname(args.cfg_path)
+
+    temp_dir: Optional[TemporaryDirectory] = None
+    if args.image_dir == TMP_IMAGE:
+        temp_dir = TemporaryDirectory()
+        image_dir = temp_dir.name
+    else:
+        image_dir = args.image_dir
+        if not os.path.exists(image_dir):
+            os.makedirs(image_dir)
+
+    try:
+        config = ProjectConfig.load(load_config(cfg_path))
+        project = UploadProject(config, image_dir)
+        project.add_project_files(root_dir)
+
+        ## Copy project files
+        _log.info(f"Copying {len(project.src_files)} project files to image...")
+        for file_path in project.src_files:
+            src_path = os.path.join(root_dir, file_path)
+            dst_path = os.path.join(image_dir, file_path)
+            _log.debug(f"Copy file: {src_path}")
+            shutil.copyfile(src_path, dst_path)
+
+        ## Cross compile scripts
+        _log.info(f"Compiling script files...")
+        for file_path in config.find_scripts(image_dir):
+            src_path = os.path.join(image_dir, file_path)
+            _log.debug(f"Compile: {src_path}")
+            cross_compile_script(src_path, compile_args=config.compile_args, delete=not args.keep_src)
+
+    finally:
+        if temp_dir is not None:
+            temp_dir.cleanup()
 
 
 if __name__ == '__main__':
@@ -142,5 +217,8 @@ if __name__ == '__main__':
     try:
         main(args)
     except Exception as err:
-        _log.error(err)
+        if args.verbosity:
+            _log.error(err, exc_info=err)
+        else:
+            _log.error(err)
         sys.exit(1)

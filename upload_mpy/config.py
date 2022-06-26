@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, NamedTuple
 if TYPE_CHECKING:
     from typing import Optional
     from configparser import ConfigParser
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Iterable
 
 __all__ = (
     'DEFAULT_CONFIG',
@@ -23,6 +23,10 @@ DEFAULT_CONFIG = {
     },
     'deploy': {
         'files': '**.py', # whitespace/comma separated list
+        'exclude-files': '',
+        'compile': '**.py',
+        'exclude-compile': 'main.py',
+        'compile-args': '-O3'
     }
 }
 
@@ -52,21 +56,45 @@ class PackageSpec(NamedTuple):
         return cls(**match.groupdict())
 
 class ProjectConfig(NamedTuple):
-    files: Sequence[str]  # file patterns, supports glob
+    search_files: Sequence[str]  # file patterns, supports glob
+    exclude_files: Sequence[str]
+    search_compile: Sequence[str]
+    exclude_compile: Sequence[str]
+    compile_args: Sequence[str]
     packages: Sequence[PackageSpec]
 
     @staticmethod
     def load(cfg: ConfigParser) -> ProjectConfig:
-        files = _split_list(cfg['deploy']['files'])
         packages = [
             PackageSpec.parse(pkg)
             for pkg in _split_list(cfg['dependencies']['packages'])
         ]
-        return ProjectConfig(files, packages)
+
+        return ProjectConfig(
+            search_files = _split_list(cfg['deploy']['files']),
+            exclude_files = _split_list(cfg['deploy']['exclude-files']),
+            search_compile = _split_list(cfg['deploy']['compile']),
+            exclude_compile = _split_list(cfg['deploy']['exclude-compile']),
+            compile_args = cfg['deploy']['compile-args'].split(),
+            packages = packages,
+        )
+
+    @staticmethod
+    def _search_files(root_dir: str, patterns: Iterable[str], exclude_patterns: Iterable[str]) -> Iterator[str]:
+        exclude = set()
+        for pattern in exclude_patterns:
+            exclude.update(iglob(pattern))
+
+        for pattern in patterns:
+            for filename in iglob(pattern, root_dir=root_dir, recursive=True):
+                if filename not in exclude:
+                    yield filename
 
     def find_files(self, root_dir: str) -> Iterator[str]:
-        for pattern in self.files:
-            yield from iglob(pattern, root_dir=root_dir, recursive=True)
+        return self._search_files(root_dir, self.search_files, self.exclude_files)
+
+    def find_scripts(self, root_dir: str) -> Iterator[str]:
+        return self._search_files(root_dir, self.search_compile, self.exclude_compile)
 
 
 
