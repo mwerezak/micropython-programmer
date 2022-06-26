@@ -1,72 +1,23 @@
-#!/usr/bin/python3
-
 from __future__ import annotations
 
-import logging
-import re
 import os
-from glob import iglob
+import logging
 from argparse import ArgumentParser
 from configparser import ConfigParser
-from collections.abc import Sequence, Iterator
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING
+
+from upload_mpy.config import DEFAULT_CONFIG, ProjectConfig
+
 if TYPE_CHECKING:
-    from typing import Any, Optional
+    from typing import Any
 
 
-_LOG = logging.getLogger()
+DEFAULT_DEVICE = '/dev/ttyACM0'
+DEFAULT_CONFIG = 'deploy.cfg'
+DEFAULT_PKGCACHE = '.pkgcache'
 
-DEFAULT_CONFIG = {
-    'dependencies': {
-        'packages': '', # whitespace/comma separated list
-    },
-    'deploy': {
-        'files': '**.py', # whitespace/comma separated list
-    }
-}
 
-def split_list(strlist: str) -> list[str]:
-    return [
-        s.strip()
-        for s in strlist
-            .translate(str.maketrans(',', ' '))
-            .split()
-    ]
-
-class PackageSpec(NamedTuple):
-    name: str                      # package name for upip
-    version: Optional[str] = None  # PEP440 version specifier
-
-    def __str__(self) -> str:
-        if self.version is not None:
-            return self.name + self.version
-        return self.name
-
-    _version_pat = re.compile(r'(?P<name>\w+?)(?P<version>(~=|==|!=|<=|>=|<|>|===)\S+)?')
-    @classmethod
-    def parse(cls, s: str) -> PackageSpec:
-        match = re.fullmatch(cls._version_pat, s)
-        if match is None:
-            raise ValueError(f'invalid package specifier: {s}')
-        return cls(**match.groupdict())
-
-class ProjectConfig(NamedTuple):
-    files: Sequence[str]  # file patterns, supports glob
-    packages: Sequence[PackageSpec]
-
-    @staticmethod
-    def load(cfg: ConfigParser) -> ProjectConfig:
-        files = split_list(cfg['deploy']['files'])
-        packages = [
-            PackageSpec.parse(pkg)
-            for pkg in split_list(cfg['dependencies']['packages'])
-        ]
-        return ProjectConfig(files, packages)
-
-    def find_files(self, root_dir: str) -> Iterator[str]:
-        for pattern in self.files:
-            yield from iglob(pattern, root_dir=root_dir, recursive=True)
-
+_log = logging.getLogger()
 
 def setup_cli() -> ArgumentParser:
     cli = ArgumentParser(
@@ -75,16 +26,17 @@ def setup_cli() -> ArgumentParser:
 
     cli.add_argument(
         '-d', '--device',
-        default = '/dev/ttyACM0',
-        help = "Serial device to communicate with RP2040 (default: /dev/ttyACM0)",
+        default = DEFAULT_DEVICE,
+        help = f"Serial device to communicate with RP2040 (default: {DEFAULT_DEVICE})",
         metavar = "DEVICE",
+        dest = 'device',
     )
     cli.add_argument(
         '-c', '--config',
-        default = 'deploy.cfg',
+        default = DEFAULT_CONFIG,
         help = (
             "Path to the project config file. If the config file does not exist, "
-            "a new default configuration will be created (default: deploy.cfg)"
+            f"a new default configuration will be created (default: {DEFAULT_CONFIG})"
         ),
         metavar = "FILE",
         dest = 'cfg_path',
@@ -119,17 +71,32 @@ def setup_cli() -> ArgumentParser:
     )
     cli.add_argument(
         '--pkg-cache',
-        default = '.pkgcache',
+        default = DEFAULT_PKGCACHE,
         help = (
-            "Specify the folder where upip packages will be cached. "
-            "This is ignored if --no-cache is set. (default: .pkgcache)"
+            "The folder where upip packages will be cached. "
+            f"This is ignored if --no-cache is set. (default: {DEFAULT_PKGCACHE})"
         ),
         metavar = "FOLDER",
         dest = 'work_dir',
     )
+    cli.add_argument(
+        '--no-cache',
+        action = 'store_false',
+        help = (
+            "Do not cache upip packages, or do not update the cache if one already exists. "
+            "Packages that are not found in the cache will be downloaded using upip."
+        ),
+        dest = 'use_cache',
+    )
+    cli.add_argument(
+        '--image-dir',
+        default = ':temp:',
+        help = (
+            ""
+        ),
+    )
 
     return cli
-
 
 def main(args: Any) -> None:
     config = ConfigParser()
@@ -141,11 +108,11 @@ def main(args: Any) -> None:
     if os.path.exists(cfg_path):
         if not os.path.isfile(cfg_path):
             raise RuntimeError(f"Can't read config, '{cfg_path}' is not a normal file!")
-        _LOG.debug(f"Reading config from '{cfg_path}'")
+        _log.debug(f"Reading config from '{cfg_path}'")
         with open(cfg_path, 'rt') as f:
             config.read_file(f)
     else:
-        _LOG.warning(f"Config file not found. Writing default config to '{cfg_path}' and exiting.")
+        _log.warning(f"Config file not found. Writing default config to '{cfg_path}' and exiting.")
         with open(cfg_path, 'wt') as f:
             config.write(f)
         return
@@ -175,5 +142,5 @@ if __name__ == '__main__':
     try:
         main(args)
     except Exception as err:
-        _LOG.error(err)
+        _log.error(err)
         sys.exit(1)

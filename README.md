@@ -1,4 +1,4 @@
-# Upload-RP2
+# Upload-MPy
 
 This tool provides an easy way to upload micropython applications 
 to a micropython-enabled device using a serial connection to communicate
@@ -10,7 +10,7 @@ micropython port (e.g. the micropython Unix port) on the host computer
 
 ### How it works
 
-The tool itself is a Python script, `upload_rp2.py`. This script uses `upip`
+The tool itself is an executable Python module, `upload_mpy`. It uses `upip`
 to download micropython packages and cross-install them to a temporary image folder 
 (packages are cached so that they are only downloaded once).
 It then copies all of your micropython application files (specified by configuration)
@@ -22,10 +22,10 @@ the contents of the image folder are uploaded to the micropython device using `p
 This tool allows you to download all required packages with upip, and 
 upload them along with any other files you specify in a single command.
 
-To do this, a deployment configuration file is used to tell `upload_rp2.py`
+To do this, a deployment configuration file is used to tell `upload_mpy`
 which packages to download and which files are part of your application.
 
-By default, `upload_rp2.py` looks for a config file named `deploy.cfg` 
+By default, `upload_mpy` looks for a config file named `deploy.cfg` 
 in the present working directory. If it is not found, a default configuration
 file that you can edit will be created for you so you can quickly get started.
 
