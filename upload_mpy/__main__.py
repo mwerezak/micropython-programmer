@@ -135,31 +135,19 @@ def load_config(cfg_path: str) -> ConfigParser:
 
     return config
 
-
-class UploadProject:
-    def __init__(self, config: ProjectConfig, image_dir: str):
-        self.config = config
-        self.image_dir = image_dir
-        self.src_files = []
-
-    def add_project_files(self, search_dir: str) -> None:
-        for file_path in self.config.find_files(search_dir):
-            if os.path.isfile(file_path):
-                self.src_files.append(file_path)
-            elif not os.path.isdir(file_path):
-                _log.warning(f"Ignoring non-regular project file '{file_path}'")
-
 _MPY_CROSS = 'mpy-cross'
-def cross_compile_script(script_path: str, *, compile_args: Iterable[str] = (), delete: bool = False) -> None:
+def cross_compile_script(script_path: str, *, compile_args: Iterable[str] = (), delete: bool = False) -> bool:
     cmd = [_MPY_CROSS, *compile_args, script_path]
     result = subprocess.run(cmd, text=True)
 
-    if result.returncode == 0:
-        if delete:
-            os.remove(script_path)
-    else:
+    if result.returncode != 0:
         _log.warning(f"Failed to compile script '{script_path}' (code {result.returncode})")
         _log.debug(result.stderr.encode(errors='replace'))
+        return False
+
+    if delete:
+        os.remove(script_path)
+    return True
 
 
 def main(args: Any) -> None:
@@ -177,23 +165,31 @@ def main(args: Any) -> None:
 
     try:
         config = ProjectConfig.load(load_config(cfg_path))
-        project = UploadProject(config, image_dir)
-        project.add_project_files(root_dir)
 
         ## Copy project files
-        _log.info(f"Copying {len(project.src_files)} project files to image...")
-        for file_path in project.src_files:
-            src_path = os.path.join(root_dir, file_path)
-            dst_path = os.path.join(image_dir, file_path)
-            _log.debug(f"Copy file: {src_path}")
-            shutil.copyfile(src_path, dst_path)
+        _log.info(f"Copying project files to image...")
+        file_count = 0
+        for file_path in config.find_files(root_dir):
+            if os.path.isfile(file_path):
+                src_path = os.path.join(root_dir, file_path)
+                dst_path = os.path.join(image_dir, file_path)
+                _log.debug(f"Copy file: {src_path}")
+                shutil.copyfile(src_path, dst_path)
+                file_count += 1
+        _log.info(f"Copied {file_count} files to image directory.")
 
         ## Cross compile scripts
         _log.info(f"Compiling script files...")
+        compile_count = 0
         for file_path in config.find_scripts(image_dir):
-            src_path = os.path.join(image_dir, file_path)
-            _log.debug(f"Compile: {src_path}")
-            cross_compile_script(src_path, compile_args=config.compile_args, delete=not args.keep_src)
+            if os.path.isfile(file_path):
+                src_path = os.path.join(image_dir, file_path)
+                _log.debug(f"Compile: {src_path}")
+                if cross_compile_script(src_path, compile_args=config.compile_args, delete=not args.keep_src):
+                    compile_count += 1
+        _log.info(f"Compiled {compile_count} script files.")
+
+        ## Upload image
 
     finally:
         if temp_dir is not None:

@@ -8,6 +8,8 @@ To use this tool, you must have CPython (>=3.8) installed and a working
 micropython port (e.g. the micropython Unix port) on the host computer 
 (to "cross-install" packages using upip).
 
+This tool has so far only been tested with the Raspberry Pi Pico.
+
 ### How it works
 
 The tool itself is an executable Python module, `upload_mpy`. It uses `upip`
