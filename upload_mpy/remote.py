@@ -20,8 +20,8 @@ class Control(Enum):
 
 def _read_all(serial: Serial, expected: bytes) -> bytes:
     result = b''
-    while len(reply := serial.read_until(expected)):
-        result += reply
+    while not len(result) or serial.in_waiting > 0:
+        result += serial.read_until(expected)
     return result
 
 def _read_until(serial: Serial, expected: bytes) -> bytes:
@@ -98,7 +98,7 @@ class RemoteREPL:
             while not output.endswith(Control.EOT.value):
                 read = self.serial.read_until(Control.EOT.value)
                 output += read
-                # _log.debug('Remote: ' + read.decode(errors='replace'))
+                # _log.debug("Remote: " + read.decode(errors='replace'))
         except KeyboardInterrupt:
             self.interrupt_program()
             output += self.serial.read_until(Control.EOT.value)
@@ -156,9 +156,15 @@ class RemoteREPL:
 
 
 if __name__ == '__main__':
-    serial = Serial('/dev/ttyACM0', timeout=2)
+    import sys
+    import atexit
+    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+
+    serial = Serial('/dev/ttyACM0', timeout=100)
+    atexit.register(serial.close)
+
     repl = RemoteREPL(serial)
-    # result = repl.remote_exec("print('Hello World!')")
+    # result = repl.exec("print('Hello World!')")
 
     blinky = """import time
 from machine import Pin

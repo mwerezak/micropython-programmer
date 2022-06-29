@@ -9,21 +9,23 @@ from configparser import ConfigParser
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
-from serial import Serial
+from serial import Serial, SerialException
 
 from config import DEFAULT_CONFIG, ProjectConfig
 from remote import RemoteREPL
-from upload import clean_fs, write_file
+import upload
 
 if TYPE_CHECKING:
     from typing import Any, Optional, Iterable
 
 
+TMP_IMAGE = ':tmp:'
+
 DEFAULT_DEVICE = '/dev/ttyACM0'
 DEFAULT_CFGFILE = 'deploy.cfg'
 DEFAULT_PKGCACHE = '.pkgcache'
-TMP_IMAGE = ':tmp:'
 DEFAULT_IMAGE = TMP_IMAGE
+DEFAULT_TIMEOUT = 5.0
 
 
 _log = logging.getLogger()
@@ -67,6 +69,14 @@ def setup_cli() -> ArgumentParser:
             "you will have to use this option to manually fetch the new versions."
         ),
         dest = 'force_fetch',
+    )
+    cli.add_argument(
+        '--reset',
+        choices = ('none', 'soft', 'hard'),
+        default = 'hard',
+        help = "Specifies how to reset the device after uploading. (default=hard)",
+        metavar = 'VALUE',
+        dest = 'reset',
     )
     cli.add_argument(
         '--root-dir',
@@ -125,6 +135,14 @@ def setup_cli() -> ArgumentParser:
             "with the compiled .mpy files."
         ),
         dest = 'keep_src',
+    )
+    cli.add_argument(
+        '--timeout',
+        type = float,
+        default = DEFAULT_TIMEOUT,
+        help = f"Set the timeout for serial communication. (default={DEFAULT_TIMEOUT:.1f})",
+        metavar = "SECONDS",
+        dest = 'timeout',
     )
 
     return cli
@@ -186,7 +204,7 @@ def main(args: Any) -> None:
             if os.path.isfile(file_path):
                 src_path = os.path.join(root_dir, file_path)
                 dst_path = os.path.join(image_dir, file_path)
-                _log.debug(f"Copy file: {src_path}")
+                _log.info(f"Copy file: {src_path}")
                 shutil.copyfile(src_path, dst_path)
                 file_count += 1
         _log.info(f"Copied {file_count} files to image directory.")
@@ -197,28 +215,35 @@ def main(args: Any) -> None:
         for file_path in config.find_scripts(image_dir):
             if os.path.isfile(file_path):
                 src_path = os.path.join(image_dir, file_path)
-                _log.debug(f"Compile: {src_path}")
+                _log.info(f"Compile: {file_path}")
                 if cross_compile_script(src_path, compile_args=config.compile_args, delete=not args.keep_src):
                     compile_count += 1
         _log.info(f"Compiled {compile_count} script files.")
 
         ## Upload image
-        serial = Serial(args.device, timeout=1)
-        remote = RemoteREPL(serial)
-        if args.clean_target:
-            _log.info(f"Cleaning target filesystem...")
-            clean_fs(remote)
-        for dirpath, dirnames, filenames in os.walk(image_dir):
-            for filename in filenames:
-                src_path = os.path.join(dirpath, filename)
-                tgt_path = os.path.relpath(src_path, image_dir)
-                with open(src_path, 'rb') as file:
-                    _log.debug(f"Upload: {tgt_path}")
-                    write_file(remote, tgt_path, file)
-
-        _log.info("Soft reset device.")
-        remote.exec("import os; if hasattr(os, 'sync'): os.sync()")
-        remote.exec("import machine; machine.soft_reset()")
+        with Serial(args.device, timeout=args.timeout) as serial:
+            remote = RemoteREPL(serial)
+            if args.clean_target:
+                _log.info(f"Cleaning target filesystem...")
+                upload.clean_fs(remote, check=True)
+            for dirpath, dirnames, filenames in os.walk(image_dir):
+                for filename in filenames:
+                    src_path = os.path.join(dirpath, filename)
+                    tgt_path = os.path.relpath(src_path, image_dir)
+                    with open(src_path, 'rb') as file:
+                        _log.info(f"Upload: {tgt_path}")
+                        upload.write_file(remote, tgt_path, file, check=True)
+            
+            remote.exec("import os; if hasattr(os, 'sync'): os.sync()")
+            if args.reset == 'soft':
+                _log.info("Soft reset device.")
+                remote.exec("import machine; machine.soft_reset()")
+            elif args.reset == 'hard':
+                _log.info("Hard reset device.")
+                try:
+                    remote.exec("import machine; machine.reset()")
+                except SerialException:
+                    pass
 
     finally:
         if temp_dir is not None:

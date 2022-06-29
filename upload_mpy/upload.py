@@ -8,11 +8,11 @@ if TYPE_CHECKING:
 
 _SCRIPT_DIR = os.path.join(os.path.dirname(__file__), 'scripts')
 
-def clean_fs(remote: RemoteREPL) -> ExecResult:
+def clean_fs(remote: RemoteREPL, *, check: bool = False) -> ExecResult:
     with open(os.path.join(_SCRIPT_DIR, 'clean_fs'), 'rt') as script_file:
-        return remote.exec(script_file.read())
+        return remote.exec(script_file.read(), check=check)
 
-def write_file(remote: RemoteREPL, target_path: str, f: Any) -> ExecResult:
+def write_file(remote: RemoteREPL, target_path: str, f: Any, *, check: bool = False) -> ExecResult:
     if hasattr(f, 'read'):
         content = f.read()
     else:
@@ -31,7 +31,7 @@ def write_file(remote: RemoteREPL, target_path: str, f: Any) -> ExecResult:
             mode = mode,
             content = content,
         )
-        return remote.exec(script)
+        return remote.exec(script, check=check)
 
 if __name__ == '__main__':
     from serial import Serial
