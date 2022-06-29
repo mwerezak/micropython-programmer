@@ -3,17 +3,19 @@ from __future__ import annotations
 import struct
 import logging
 from enum import Enum
-from serial import Serial
+from contextlib import contextmanager
+from serial import Serial, SerialException
 from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
-    from typing import Optional
+    from typing import Optional, ContextManager
 
 
 _log = logging.getLogger(__name__)
 
 class Control(Enum):
     SOH = b'\x01'  # Ctrl-A
+    STX = b'\x02'  # Ctrl-B
     ETX = b'\x03'  # Ctrl-C
     EOT = b'\x04'  # Ctrl-D
     ENQ = b'\x05'  # Ctrl-E
@@ -58,31 +60,51 @@ class RemoteREPL:
     def interrupt_program(self) -> None:
         self.serial.write(Control.ETX.value)
 
-    _raw_input_success = b'raw REPL; CTRL-B to exit\r\n>'
-    def exec(self, script_text: str, *, check: bool = False) -> ExecResult:
+    # useful since machine.soft_reset() seems to not work in raw input mode
+    def soft_reset(self) -> None:
         self.interrupt_program()
-        _read_discard(self.serial)
+        self.serial.write(Control.STX.value)
+        self.serial.write(Control.EOT.value)
 
+    def hard_reset(self) -> None:
+        try:
+            self.exec("import machine; machine.reset()")
+        except SerialException:
+            pass
+
+    _raw_input_success = b'raw REPL; CTRL-B to exit\r\n>'
+    @contextmanager
+    def _raw_input_mode(self) -> ContextManager:
         ## Enter raw input mode
         self.serial.write(Control.SOH.value)
         reply = _read_all(self.serial, b'>')
         if not reply.endswith(b'>'):
             raise REPLError('failed to enter raw input mode')
 
-        ## try to use raw paste mode
-        payload = script_text.encode()
-        if self.use_raw_paste:
-            try:
-                self._raw_paste_write(payload)
-            except RawPasteNotSupported:
-                self.use_raw_paste = False
-                _read_discard(self.serial)
-            else:
-                return self._collect_exec_result(check)
+        try:
+            yield
+        finally:
+            self.serial.write(Control.STX.value)
 
-        ## fallback to regular raw input mode
-        self._regular_raw_write(payload)
-        return self._collect_exec_result(check)
+    def exec(self, script_text: str, *, check: bool = False) -> ExecResult:
+        self.interrupt_program()
+        _read_discard(self.serial)
+
+        with self._raw_input_mode():
+            ## try to use raw paste mode
+            payload = script_text.encode()
+            if self.use_raw_paste:
+                try:
+                    self._raw_paste_write(payload)
+                except RawPasteNotSupported:
+                    self.use_raw_paste = False
+                    _read_discard(self.serial)
+                else:
+                    return self._collect_exec_result(check)
+
+            ## fallback to regular raw input mode
+            self._regular_raw_write(payload)
+            return self._collect_exec_result(check)
 
     def _regular_raw_write(self, payload: bytes):
         self.serial.write(payload)

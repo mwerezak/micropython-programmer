@@ -7,7 +7,7 @@ from argparse import ArgumentParser
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
-from serial import Serial, SerialException
+from serial import Serial
 
 from config import ProjectConfig, load_config
 from remote import RemoteREPL
@@ -24,6 +24,7 @@ DEFAULT_CFGFILE = 'deploy.cfg'
 DEFAULT_PKGCACHE = '.pkgcache'
 DEFAULT_IMAGE = TMP_IMAGE
 DEFAULT_TIMEOUT = 5.0
+DEFAULT_RESET = 'soft'
 
 _log = logging.getLogger()
 
@@ -70,8 +71,8 @@ def setup_cli() -> ArgumentParser:
     cli.add_argument(
         '--reset',
         choices = ('none', 'soft', 'hard'),
-        default = 'hard',
-        help = "Specifies how to reset the device after uploading. (default=hard)",
+        default = DEFAULT_RESET,
+        help = f"Specifies how to reset the device after uploading. (default={DEFAULT_RESET})",
         metavar = 'VALUE',
         dest = 'reset',
     )
@@ -216,17 +217,15 @@ def main(args: Any) -> None:
             remote.exec("import os; if hasattr(os, 'sync'): os.sync()")
             if args.reset == 'soft':
                 _log.info("Soft reset device.")
-                remote.exec("import machine; machine.soft_reset()")
+                remote.soft_reset()
             elif args.reset == 'hard':
                 _log.info("Hard reset device.")
-                try:
-                    remote.exec("import machine; machine.reset()")
-                except SerialException:
-                    pass
-
+                remote.hard_reset()
     finally:
         if temp_dir is not None:
             temp_dir.cleanup()
+
+
 
 
 if __name__ == '__main__':
