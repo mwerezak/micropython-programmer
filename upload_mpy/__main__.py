@@ -3,20 +3,18 @@ from __future__ import annotations
 import os
 import shutil
 import logging
-import subprocess
 from argparse import ArgumentParser
-from configparser import ConfigParser
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 from serial import Serial, SerialException
 
-from config import DEFAULT_CONFIG, ProjectConfig
+from config import ProjectConfig, load_config
 from remote import RemoteREPL
 import upload
 
 if TYPE_CHECKING:
-    from typing import Any, Optional, Iterable
+    from typing import Any
 
 
 TMP_IMAGE = ':tmp:'
@@ -26,7 +24,6 @@ DEFAULT_CFGFILE = 'deploy.cfg'
 DEFAULT_PKGCACHE = '.pkgcache'
 DEFAULT_IMAGE = TMP_IMAGE
 DEFAULT_TIMEOUT = 5.0
-
 
 _log = logging.getLogger()
 
@@ -147,30 +144,8 @@ def setup_cli() -> ArgumentParser:
 
     return cli
 
-def load_config(cfg_path: str) -> ConfigParser:
-    config = ConfigParser()
-    config.read_dict(DEFAULT_CONFIG)
-
-    # load config or create file if it does not exist
-    if os.path.exists(cfg_path):
-        if not os.path.isfile(cfg_path):
-            raise RuntimeError(f"Can't read config, '{cfg_path}' is not a regular file!")
-        _log.debug(f"Reading config from '{cfg_path}'")
-        with open(cfg_path, 'rt') as f:
-            config.read_file(f)
-    else:
-        _log.warning(f"Config file not found. Writing default config to '{cfg_path}' and exiting.")
-        with open(cfg_path, 'wt') as f:
-            config.write(f)
-        raise SystemExit(1)
-
-    return config
-
-_MPY_CROSS = 'mpy-cross'
-def cross_compile_script(script_path: str, *, compile_args: Iterable[str] = (), delete: bool = False) -> bool:
-    cmd = [_MPY_CROSS, *compile_args, script_path]
-    result = subprocess.run(cmd, text=True)
-
+def cross_compile_script(config: ProjectConfig, script_path: str, *, delete: bool = False) -> bool:
+    result = config.invoke_cc(script_path, text=True)
     if result.returncode != 0:
         _log.warning(f"Failed to compile script '{script_path}' (code {result.returncode})")
         _log.debug(result.stderr.encode(errors='replace'))
@@ -184,8 +159,9 @@ def cross_compile_script(script_path: str, *, compile_args: Iterable[str] = (), 
 def main(args: Any) -> None:
     cfg_path = args.cfg_path
     root_dir = args.search_dir or os.path.dirname(args.cfg_path)
+    config = ProjectConfig.load(load_config(cfg_path))
 
-    temp_dir: Optional[TemporaryDirectory] = None
+    temp_dir = None
     if args.image_dir == TMP_IMAGE:
         temp_dir = TemporaryDirectory()
         image_dir = temp_dir.name
@@ -195,8 +171,6 @@ def main(args: Any) -> None:
             os.makedirs(image_dir)
 
     try:
-        config = ProjectConfig.load(load_config(cfg_path))
-
         ## Copy project files
         _log.info(f"Copying project files to image...")
         file_count = 0
@@ -207,7 +181,7 @@ def main(args: Any) -> None:
                 _log.info(f"Copy file: {src_path}")
                 shutil.copyfile(src_path, dst_path)
                 file_count += 1
-        _log.info(f"Copied {file_count} files to image directory.")
+        _log.info(f"Copied {file_count} file(s) to image directory.")
 
         ## Cross compile scripts
         _log.info(f"Compiling script files...")
@@ -216,9 +190,9 @@ def main(args: Any) -> None:
             if os.path.isfile(file_path):
                 src_path = os.path.join(image_dir, file_path)
                 _log.info(f"Compile: {file_path}")
-                if cross_compile_script(src_path, compile_args=config.compile_args, delete=not args.keep_src):
+                if cross_compile_script(config, src_path, delete=not args.keep_src):
                     compile_count += 1
-        _log.info(f"Compiled {compile_count} script files.")
+        _log.info(f"Compiled {compile_count} script file(s).")
 
         ## Upload image
         with Serial(args.device, timeout=args.timeout) as serial:
@@ -226,13 +200,18 @@ def main(args: Any) -> None:
             if args.clean_target:
                 _log.info(f"Cleaning target filesystem...")
                 upload.clean_fs(remote, check=True)
+
+            _log.info(f"Writing files to device...")
+            upload_count = 0
             for dirpath, dirnames, filenames in os.walk(image_dir):
                 for filename in filenames:
                     src_path = os.path.join(dirpath, filename)
                     tgt_path = os.path.relpath(src_path, image_dir)
                     with open(src_path, 'rb') as file:
-                        _log.info(f"Upload: {tgt_path}")
+                        _log.info(f"Write: {tgt_path}")
                         upload.write_file(remote, tgt_path, file, check=True)
+                        upload_count += 1
+            _log.info(f"Wrote {upload_count} file(s) to device filesystem.")
 
             remote.exec("import os; if hasattr(os, 'sync'): os.sync()")
             if args.reset == 'soft':
@@ -261,13 +240,15 @@ if __name__ == '__main__':
         2: logging.DEBUG,
     }
     log_level = log_levels.get(args.verbosity, logging.WARNING)
-    log_format = '%(levelname)s: %(message)s' #if args.verbosity else '%(message)s'
+    log_format = '%(levelname)s: %(message)s'
     logging.basicConfig(stream=sys.stdout, format=log_format, level=log_level)
 
     try:
         main(args)
+    except SystemExit as err:
+        raise
     except Exception as err:
-        if args.verbosity:
+        if log_level <= logging.DEBUG:
             _log.error(err, exc_info=err)
         else:
             _log.error(err)
