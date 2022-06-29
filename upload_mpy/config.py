@@ -31,7 +31,7 @@ DEFAULT_CONFIG = {
     'deploy': {
         'files': '**.py', # whitespace/comma separated list
         'exclude-files': '',
-        'mpy-cc': 'mpy-cross -O3 {scriptpath}',  # cross compiler command, must be in PATH
+        'mpy-cc': 'mpy-cross -s {filename} -O3 {scriptpath}',  # cross compiler command, must be in PATH
         'compile': '**.py',
         'exclude-compile': '\nboot.py\nmain.py',
     }
@@ -133,7 +133,7 @@ class ProjectConfig(NamedTuple):
     def find_scripts(self, root_dir: str) -> Iterator[str]:
         return self._search_files(root_dir, self.search_compile, self.exclude_compile)
 
-    def invoke_cc(self, script_path, **kwargs: Any) -> CompletedProcess:
-        cmd = self.compile_cmd.format(scriptpath=script_path)
+    def invoke_cc(self, file_name, script_path, **kwargs: Any) -> CompletedProcess:
+        cmd = self.compile_cmd.format(filename=file_name, scriptpath=script_path)
         return subprocess.run(shlex.split(cmd), **kwargs)
 
