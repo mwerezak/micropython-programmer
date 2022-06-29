@@ -38,7 +38,7 @@ def setup_cli() -> ArgumentParser:
     cli.add_argument(
         '-d', '--device',
         default = DEFAULT_DEVICE,
-        help = f"Serial device to communicate with RP2040 (default={DEFAULT_DEVICE})",
+        help = f"Serial device to communicate with the micropython REPL. (default={DEFAULT_DEVICE})",
         metavar = "DEVICE",
         dest = 'device',
     )
@@ -47,7 +47,7 @@ def setup_cli() -> ArgumentParser:
         default = DEFAULT_CFGFILE,
         help = (
             "Path to the project config file. If the config file does not exist, "
-            f"a new default configuration will be created (default={DEFAULT_CFGFILE})"
+            f"a new default configuration will be created. (default={DEFAULT_CFGFILE})"
         ),
         metavar = "FILE",
         dest = 'cfg_path',
@@ -233,7 +233,7 @@ def main(args: Any) -> None:
                     with open(src_path, 'rb') as file:
                         _log.info(f"Upload: {tgt_path}")
                         upload.write_file(remote, tgt_path, file, check=True)
-            
+
             remote.exec("import os; if hasattr(os, 'sync'): os.sync()")
             if args.reset == 'soft':
                 _log.info("Soft reset device.")
