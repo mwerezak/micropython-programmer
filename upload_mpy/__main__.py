@@ -29,7 +29,7 @@ _log = logging.getLogger()
 
 def setup_cli() -> ArgumentParser:
     cli = ArgumentParser(
-        description = "Upload micropython applications to a Raspberry Pi Pico over USB serial.",
+        description = "Upload code to a micropython-enabled device over a serial connection.",
     )
 
     cli.add_argument(
