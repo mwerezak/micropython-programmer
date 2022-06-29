@@ -33,7 +33,7 @@ DEFAULT_CONFIG = {
         'exclude-files': '',
         'mpy-cc': 'mpy-cross -O3 {scriptpath}',  # cross compiler command, must be in PATH
         'compile': '**.py',
-        'exclude-compile': 'main.py',
+        'exclude-compile': '\nboot.py\nmain.py',
     }
 }
 
