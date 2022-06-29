@@ -18,13 +18,31 @@ class Control(Enum):
     EOT = b'\x04'  # Ctrl-D
     ENQ = b'\x05'  # Ctrl-E
 
+def _read_all(serial: Serial, expected: bytes) -> bytes:
+    result = b''
+    while len(reply := serial.read_until(expected)):
+        result += reply
+    return result
+
+def _read_until(serial: Serial, expected: bytes) -> bytes:
+    result = bytearray()
+    while not result.endswith(expected):
+        result += serial.read_until(expected)
+    return bytes(result)
+
+def _read_discard(serial: Serial) -> None:
+    while serial.in_waiting > 0:
+        serial.read(serial.in_waiting)
+
+
 class ExecResult(NamedTuple):
     output: str
     exception: Optional[str]
 
 class REPLError(Exception): pass
+class RawPasteNotSupported(Exception): pass
 
-class MPyREPL:
+class RemoteREPL:
     _linesep = b'\r\n'
 
     def __init__(self, serial: Serial):
@@ -34,57 +52,39 @@ class MPyREPL:
     def interrupt_program(self) -> None:
         self.serial.write(Control.ETX.value)
 
-    def _read_all(self, expected: bytes) -> bytes:
-        result = b''
-        while len(reply := self.serial.read_until(expected)):
-            result += reply
-        return result
-
-    def _read_until(self, expected: bytes) -> bytes:
-        result = bytearray()
-        while not result.endswith(expected):
-            result += self.serial.read_until(expected)
-        return bytes(result)
-
-    def _read_discard(self) -> None:
-        while self.serial.in_waiting > 0:
-            self.serial.read(self.serial.in_waiting)
-
     _raw_input_success = b'raw REPL; CTRL-B to exit\r\n>'
     def remote_exec(self, script_text: str) -> ExecResult:
         self.interrupt_program()
-        self._read_discard()
+        _read_discard(self.serial)
 
         ## Enter raw input mode
         self.serial.write(Control.SOH.value)
-        reply = self._read_all(b'>')
+        reply = _read_all(self.serial, b'>')
         if not reply.endswith(b'>'):
             raise REPLError('failed to enter raw input mode')
 
         ## try to use raw paste mode
+        payload = script_text.encode()
         if self.use_raw_paste:
             try:
-                session = RawPasteSession(self.serial)
-                session.begin()
-            except RawPasteError:
+                self._raw_paste_write(payload)
+            except RawPasteNotSupported:
                 self.use_raw_paste = False
-                self._read_discard()
+                _read_discard(self.serial)
             else:
-                session.write(script_text.encode())
-
-                reply = self._read_until(Control.EOT.value)
-                if not reply.endswith(Control.EOT.value):
-                    raise REPLError(f'failed to execute command (response: {reply!r})')
                 return self._collect_exec_result()
 
         ## fallback to regular raw input mode
-        self.serial.write(script_text.encode())
+        self._regular_raw_write(payload)
+        return self._collect_exec_result()
+
+    def _regular_raw_write(self, payload: bytes):
+        self.serial.write(payload)
         self.serial.write(Control.EOT.value)
 
         reply = self.serial.read(2)
         if reply != b'OK':
             raise REPLError(f'failed to execute command (response: {reply!r})')
-        return self._collect_exec_result()
 
     def _collect_exec_result(self) -> ExecResult:
         output = bytearray()
@@ -106,57 +106,47 @@ class MPyREPL:
 
         return ExecResult(output, exception)
 
-
-class RawPasteError(Exception): pass
-
-class RawPasteSession:
-    def __init__(self, serial: Serial):
-        self.serial = serial
-        self._buf = bytearray()
-        self._window_len = None
-        self._window = None
-
-    def begin(self) -> None:
+    def _raw_paste_write(self, payload: bytes):
+        ## try to enter raw paste mode
         self.serial.write(Control.ENQ.value)
         self.serial.write(b'A')
         self.serial.write(Control.SOH.value)
         reply = self.serial.read(2)
         if reply == b'R\x00':
-            raise RawPasteError('the device understands the command but doesn’t support raw paste')
+            raise RawPasteNotSupported('the device understands the command but doesn’t support raw paste')
         elif reply != b'R\x01':
-            raise RawPasteError('the device does not support raw paste')
+            raise RawPasteNotSupported('the device does not support raw paste')
 
-        window_len = self.serial.read(2)
-        self._window_len = struct.unpack('<H', window_len)[0]
-        self._window = self._window_len
+        win_size = self.serial.read(2)
+        win_size = struct.unpack('<H', win_size)[0]
 
-    def write(self, payload: bytes) -> None:
-        self._buf += payload
-        while len(self._buf) > 0:
-            while self._window == 0 or self.serial.in_waiting > 0:
+        win_rem = win_size  # bytes remaining in window
+        wbuf = bytearray(payload)
+        while len(wbuf) > 0:
+            while win_rem == 0 or self.serial.in_waiting > 0:
                 reply = self.serial.read(1)
                 if reply == Control.SOH.value:
-                    self._window += self._window_len
+                    win_rem += win_size  # new window available
                 elif reply == Control.EOT.value:
                     self.serial.write(Control.EOT.value)
-                    raise RawPasteError('device indicated abrupt end of input')
+                    raise REPLError('device indicated abrupt end of input')
                 else:
-                    raise RawPasteError(f'unexpected reply: {reply!r}')
+                    raise REPLError(f'unexpected reply: {reply!r}')
 
-            nwrite = self.serial.write(self._buf[:self._window])
-            self._window -= nwrite
-            del self._buf[:nwrite]
+            nwrite = self.serial.write(wbuf[:win_rem])
+            win_rem -= nwrite
+            del wbuf[:nwrite]
 
         # end of data
         self.serial.write(Control.EOT.value)
-
-
-
+        reply = _read_until(self.serial, Control.EOT.value)
+        if not reply.endswith(Control.EOT.value):
+            raise REPLError(f'failed to execute command (response: {reply!r})')
 
 
 if __name__ == '__main__':
     serial = Serial('/dev/ttyACM0', timeout=2)
-    repl = MPyREPL(serial)
+    repl = RemoteREPL(serial)
     # result = repl.remote_exec("print('Hello World!')")
 
     blinky = """import time
