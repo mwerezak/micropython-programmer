@@ -8,7 +8,8 @@ To use this tool, you must have CPython (>=3.8) installed and a working
 micropython port (e.g. the micropython Unix port) on the host computer 
 (to "cross-install" packages using upip).
 
-This tool has so far only been tested with the Raspberry Pi Pico.
+This tool has so far only been tested with the Raspberry Pi Pico, but should
+work with any board where you can get the micropython REPL over UART.
 
 ### How it works
 
