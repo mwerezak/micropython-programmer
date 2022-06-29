@@ -1,0 +1,37 @@
+import os
+_FS_SEP = const('/')
+def fs_pathsplit(path):
+    isroot = path.startswith(_FS_SEP)
+    path = path.rstrip(_FS_SEP)
+    i = path.rfind(_FS_SEP) + 1
+    dirname, basename = path[:i], path[i:]
+    dirname = dirname.rstrip(_FS_SEP)
+    if isroot and not len(dirname):
+        dirname = _FS_SEP
+    return dirname, basename
+def fs_pathjoin(base, *items):
+    path = base
+    for a in items:
+        if a.startswith(_FS_SEP):
+            path = a
+        elif not len(path) or path.endswith(_FS_SEP):
+            path += a
+        else:
+            path += _FS_SEP + a
+    return path
+def fs_exists(path):
+    try:
+        os.stat(path)
+        return True
+    except OSError:
+        return False
+def fs_mkdir(path):
+    parent, _ = fs_pathsplit(path)
+    if not fs_exists(parent):
+        fs_mkdir(parent)
+    os.mkdir(path)
+parent, _ = fs_pathsplit({targetpath!r})
+if not fs_exists(parent):
+    fs_mkdir(parent)
+with open({targetpath!r}, {mode!r}) as f:
+    print(repr(f.write({content!r})))

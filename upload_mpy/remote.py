@@ -35,9 +35,15 @@ def _read_discard(serial: Serial) -> None:
         serial.read(serial.in_waiting)
 
 
+class RemoteExecError(Exception): pass
+
 class ExecResult(NamedTuple):
     output: str
     exception: Optional[str]
+
+    def check(self) -> None:
+        if self.exception is not None:
+            raise RemoteExecError
 
 class REPLError(Exception): pass
 class RawPasteNotSupported(Exception): pass
@@ -53,7 +59,7 @@ class RemoteREPL:
         self.serial.write(Control.ETX.value)
 
     _raw_input_success = b'raw REPL; CTRL-B to exit\r\n>'
-    def remote_exec(self, script_text: str) -> ExecResult:
+    def exec(self, script_text: str, *, check: bool = False) -> ExecResult:
         self.interrupt_program()
         _read_discard(self.serial)
 
@@ -72,11 +78,11 @@ class RemoteREPL:
                 self.use_raw_paste = False
                 _read_discard(self.serial)
             else:
-                return self._collect_exec_result()
+                return self._collect_exec_result(check)
 
         ## fallback to regular raw input mode
         self._regular_raw_write(payload)
-        return self._collect_exec_result()
+        return self._collect_exec_result(check)
 
     def _regular_raw_write(self, payload: bytes):
         self.serial.write(payload)
@@ -86,11 +92,13 @@ class RemoteREPL:
         if reply != b'OK':
             raise REPLError(f'failed to execute command (response: {reply!r})')
 
-    def _collect_exec_result(self) -> ExecResult:
+    def _collect_exec_result(self, check: bool) -> ExecResult:
         output = bytearray()
         try:
             while not output.endswith(Control.EOT.value):
-                output += self.serial.read_until(Control.EOT.value)
+                read = self.serial.read_until(Control.EOT.value)
+                output += read
+                # _log.debug('Remote: ' + read.decode(errors='replace'))
         except KeyboardInterrupt:
             self.interrupt_program()
             output += self.serial.read_until(Control.EOT.value)
@@ -104,7 +112,10 @@ class RemoteREPL:
         else:
             exception = exception.decode()
 
-        return ExecResult(output, exception)
+        result = ExecResult(output, exception)
+        if check:
+            result.check()
+        return result
 
     def _raw_paste_write(self, payload: bytes):
         ## try to enter raw paste mode

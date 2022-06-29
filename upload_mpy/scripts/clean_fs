@@ -1,0 +1,34 @@
+import os
+_FS_SEP  = const('/')
+_FS_DIR  = const(0x4000)
+_FS_FILE = const(0x8000)
+def fs_pathjoin(base, *items):
+    path = base
+    for a in items:
+        if a.startswith(_FS_SEP):
+            path = a
+        elif not len(path) or path.endswith(_FS_SEP):
+            path += a
+        else:
+            path += _FS_SEP + a
+    return path
+def fs_walk(dirpath):
+    dirnames = []
+    filenames = []
+    for name, ftype, *_ in os.ilistdir(dirpath):
+        if (ftype & _FS_DIR) != 0:
+            dirnames.append(name)
+        if (ftype & _FS_FILE) != 0:
+            filenames.append(name)
+    for dirname in dirnames:
+        yield from fs_walk(fs_pathjoin(dirpath, dirname))
+    yield dirpath, dirnames, filenames
+for path, dirnames, filenames in fs_walk('/'):
+    for filename in filenames:
+        filepath = fs_pathjoin(path, filename)
+        print(f"remove file: {filepath}") 
+        os.remove(filepath)
+    for dirname in dirnames:
+        dirpath = fs_pathjoin(path, dirname)
+        print(f"remove dir: {dirpath}") 
+        os.rmdir(dirpath)

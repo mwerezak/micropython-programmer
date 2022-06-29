@@ -9,7 +9,11 @@ from configparser import ConfigParser
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
+from serial import Serial
+
 from config import DEFAULT_CONFIG, ProjectConfig
+from remote import RemoteREPL
+from upload import clean_fs, write_file
 
 if TYPE_CHECKING:
     from typing import Any, Optional, Iterable
@@ -92,6 +96,15 @@ def setup_cli() -> ArgumentParser:
             "Packages that are not found in the cache will be downloaded using upip."
         ),
         dest = 'use_cache',
+    )
+    cli.add_argument(
+        '--no-clean',
+        action = 'store_false',
+        help = (
+            "Do not clean the target filesystem before uploading. Existing files may be "
+            "overwritten, but others will be left unchanged."
+        ),
+        dest = 'clean_target',
     )
     cli.add_argument(
         '--image-dir',
@@ -190,6 +203,22 @@ def main(args: Any) -> None:
         _log.info(f"Compiled {compile_count} script files.")
 
         ## Upload image
+        serial = Serial(args.device, timeout=1)
+        remote = RemoteREPL(serial)
+        if args.clean_target:
+            _log.info(f"Cleaning target filesystem...")
+            clean_fs(remote)
+        for dirpath, dirnames, filenames in os.walk(image_dir):
+            for filename in filenames:
+                src_path = os.path.join(dirpath, filename)
+                tgt_path = os.path.relpath(src_path, image_dir)
+                with open(src_path, 'rb') as file:
+                    _log.debug(f"Upload: {tgt_path}")
+                    write_file(remote, tgt_path, file)
+
+        _log.info("Soft reset device.")
+        remote.exec("import os; if hasattr(os, 'sync'): os.sync()")
+        remote.exec("import machine; machine.soft_reset()")
 
     finally:
         if temp_dir is not None:
