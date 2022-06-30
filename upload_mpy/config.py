@@ -120,7 +120,7 @@ class ProjectConfig(NamedTuple):
     def _search_files(root_dir: str, patterns: Iterable[str], exclude_patterns: Iterable[str]) -> Iterator[str]:
         exclude = set()
         for pattern in exclude_patterns:
-            exclude.update(iglob(pattern))
+            exclude.update(iglob(pattern, root_dir=root_dir, recursive=True))
 
         for pattern in patterns:
             for filename in iglob(pattern, root_dir=root_dir, recursive=True):

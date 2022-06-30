@@ -174,12 +174,12 @@ def main(args: Any) -> None:
     try:
         ## Copy project files
         _log.info(f"Copying project files to image...")
+        _log.debug(f"Searching for project files in '{root_dir}'")
         file_count = 0
-        for file_path in config.find_files(root_dir):
-            if os.path.isfile(file_path):
-                src_path = os.path.join(root_dir, file_path)
-                dst_path = os.path.join(image_dir, file_path)
-
+        for file_name in config.find_files(root_dir):
+            src_path = os.path.join(root_dir, file_name)
+            if os.path.isfile(src_path):
+                dst_path = os.path.join(image_dir, file_name)
                 dst_dir = os.path.dirname(dst_path)
                 if not os.path.exists(dst_dir):
                     os.makedirs(dst_dir)
@@ -192,11 +192,11 @@ def main(args: Any) -> None:
         ## Cross compile scripts
         _log.info(f"Compiling script files...")
         compile_count = 0
-        for file_path in config.find_scripts(image_dir):
-            if os.path.isfile(file_path):
-                src_path = os.path.join(image_dir, file_path)
-                _log.info(f"Compile: {file_path}")
-                if cross_compile_script(config, file_path, src_path, delete=not args.keep_src):
+        for file_name in config.find_scripts(image_dir):
+            src_path = os.path.join(image_dir, file_name)
+            if os.path.isfile(src_path):
+                _log.info(f"Compile: {file_name}")
+                if cross_compile_script(config, file_name, src_path, delete=not args.keep_src):
                     compile_count += 1
         _log.info(f"Compiled {compile_count} script file(s).")
 
