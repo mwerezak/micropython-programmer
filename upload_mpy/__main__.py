@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import logging
+import subprocess
 from argparse import ArgumentParser
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
@@ -146,11 +147,11 @@ def setup_cli() -> ArgumentParser:
     return cli
 
 def cross_compile_script(config: ProjectConfig, file_name: str, script_path: str, *, delete: bool = False) -> bool:
-    result = config.invoke_cc(file_name, script_path, text=True)
-    if result.returncode != 0:
-        _log.warning(f"Failed to compile script '{script_path}' (code {result.returncode})")
-        _log.debug(result.stderr.encode(errors='replace'))
-        return False
+    try:
+        config.invoke_cc(file_name, script_path, check=True, text=True)
+    except subprocess.CalledProcessError as err:
+        _log.error(f"Failed to compile script '{script_path}' (code {err.returncode})")
+        raise SystemExit(2)
 
     if delete:
         os.remove(script_path)
