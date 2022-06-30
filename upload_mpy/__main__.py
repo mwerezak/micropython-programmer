@@ -179,6 +179,11 @@ def main(args: Any) -> None:
             if os.path.isfile(file_path):
                 src_path = os.path.join(root_dir, file_path)
                 dst_path = os.path.join(image_dir, file_path)
+
+                dst_dir = os.path.dirname(dst_path)
+                if not os.path.exists(dst_dir):
+                    os.makedirs(dst_dir)
+
                 _log.info(f"Copy file: {src_path}")
                 shutil.copyfile(src_path, dst_path)
                 file_count += 1

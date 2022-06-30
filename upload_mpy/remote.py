@@ -180,9 +180,9 @@ class RemoteREPL:
 if __name__ == '__main__':
     import sys
     import atexit
-    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+    # logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
-    serial = Serial('/dev/ttyACM0', timeout=100)
+    serial = Serial('/dev/ttyACM0', timeout=1)
     atexit.register(serial.close)
 
     repl = RemoteREPL(serial)
