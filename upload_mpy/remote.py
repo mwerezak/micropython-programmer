@@ -22,13 +22,13 @@ class Control(Enum):
 
 def _read_all(serial: Serial, expected: bytes) -> bytes:
     result = b''
-    while not len(result) or serial.in_waiting > 0:
+    while serial.in_waiting > 0:
         result += serial.read_until(expected)
     return result
 
 def _read_until(serial: Serial, expected: bytes) -> bytes:
     result = bytearray()
-    while not result.endswith(expected):
+    while not result.endswith(expected) and serial.in_waiting > 0:
         result += serial.read_until(expected)
     return bytes(result)
 
