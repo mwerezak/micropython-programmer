@@ -29,10 +29,10 @@ DEFAULT_CONFIG = {
         'packages': '', # whitespace/comma separated list
     },
     'deploy': {
-        'files': '**.py', # whitespace/comma separated list
+        'files': '**/*.py', # whitespace/comma separated list
         'exclude-files': '',
         'mpy-cc': 'mpy-cross -s {filename} -O3 {scriptpath}',  # cross compiler command, must be in PATH
-        'compile': '**.py',
+        'compile': '**/*.py',
         'exclude-compile': '\nboot.py\nmain.py',
     }
 }
