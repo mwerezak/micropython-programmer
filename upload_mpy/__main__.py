@@ -204,6 +204,8 @@ def main(args: Any) -> None:
         ## Upload image
         with Serial(args.device, timeout=args.timeout) as serial:
             remote = RemoteREPL(serial)
+            remote.soft_reset()
+
             if args.clean_target:
                 _log.info(f"Cleaning target filesystem...")
                 upload.clean_fs(remote, check=True)

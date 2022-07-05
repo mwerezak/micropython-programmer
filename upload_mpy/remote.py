@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import struct
 import logging
 from enum import Enum
@@ -21,20 +22,24 @@ class Control(Enum):
     ENQ = b'\x05'  # Ctrl-E
 
 def _read_all(serial: Serial, expected: bytes) -> bytes:
+    time.sleep(0.1)
     result = b''
     while serial.in_waiting > 0:
         result += serial.read_until(expected)
     return result
 
 def _read_until(serial: Serial, expected: bytes) -> bytes:
+    time.sleep(0.1)
     result = bytearray()
     while not result.endswith(expected) and serial.in_waiting > 0:
         result += serial.read_until(expected)
     return bytes(result)
 
 def _read_discard(serial: Serial) -> None:
+    time.sleep(0.1)
     while serial.in_waiting > 0:
         serial.read(serial.in_waiting)
+    serial.reset_input_buffer()
 
 
 class RemoteExecError(Exception): pass
@@ -45,7 +50,7 @@ class ExecResult(NamedTuple):
 
     def check(self) -> None:
         if self.exception is not None:
-            raise RemoteExecError
+            raise RemoteExecError(self.exception)
 
 class REPLError(Exception): pass
 class RawPasteNotSupported(Exception): pass
@@ -76,6 +81,7 @@ class RemoteREPL:
     @contextmanager
     def _raw_input_mode(self) -> ContextManager:
         ## Enter raw input mode
+        self.serial.write(Control.SOH.value)
         self.serial.write(Control.SOH.value)
         reply = _read_all(self.serial, b'>')
         if not reply.endswith(b'>'):
