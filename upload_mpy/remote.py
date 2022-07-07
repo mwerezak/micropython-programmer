@@ -22,21 +22,21 @@ class Control(Enum):
     ENQ = b'\x05'  # Ctrl-E
 
 def _read_all(serial: Serial, expected: bytes) -> bytes:
-    time.sleep(0.1)
+    time.sleep(0.005)
     result = b''
     while serial.in_waiting > 0:
         result += serial.read_until(expected)
     return result
 
 def _read_until(serial: Serial, expected: bytes) -> bytes:
-    time.sleep(0.1)
+    time.sleep(0.005)
     result = bytearray()
     while not result.endswith(expected) and serial.in_waiting > 0:
         result += serial.read_until(expected)
     return bytes(result)
 
 def _read_discard(serial: Serial) -> None:
-    time.sleep(0.1)
+    time.sleep(0.005)
     while serial.in_waiting > 0:
         serial.read(serial.in_waiting)
     serial.reset_input_buffer()
