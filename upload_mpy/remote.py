@@ -21,22 +21,24 @@ class Control(Enum):
     EOT = b'\x04'  # Ctrl-D
     ENQ = b'\x05'  # Ctrl-E
 
+_read_delay = 0.01
+
 def _read_all(serial: Serial, expected: bytes) -> bytes:
-    time.sleep(0.005)
     result = b''
+    time.sleep(_read_delay)
     while serial.in_waiting > 0:
         result += serial.read_until(expected)
     return result
 
 def _read_until(serial: Serial, expected: bytes) -> bytes:
-    time.sleep(0.005)
     result = bytearray()
+    time.sleep(_read_delay)
     while not result.endswith(expected) and serial.in_waiting > 0:
         result += serial.read_until(expected)
     return bytes(result)
 
 def _read_discard(serial: Serial) -> None:
-    time.sleep(0.005)
+    time.sleep(_read_delay)
     while serial.in_waiting > 0:
         serial.read(serial.in_waiting)
     serial.reset_input_buffer()
@@ -70,6 +72,9 @@ class RemoteREPL:
         self.interrupt_program()
         self.serial.write(Control.STX.value)
         self.serial.write(Control.EOT.value)
+
+        time.sleep(0.2)
+        self.interrupt_program()
 
     def hard_reset(self) -> None:
         try:
